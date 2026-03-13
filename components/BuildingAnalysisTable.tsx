@@ -7,13 +7,14 @@ import { resolveLocation, ResolvedLocation } from '../services/locationService';
 
 interface BuildingAnalysisTableProps {
   data: BuildingRisk[];
+  resolvedLocations?: Record<string, ResolvedLocation>;
+  onLocationResolved?: (key: string, location: ResolvedLocation) => void;
 }
 
-const BuildingAnalysisTable: React.FC<BuildingAnalysisTableProps> = ({ data }) => {
+const BuildingAnalysisTable: React.FC<BuildingAnalysisTableProps> = ({ data, resolvedLocations = {}, onLocationResolved }) => {
   const [visibleCount, setVisibleCount] = useState(50);
   const [searchQuery, setSearchQuery] = useState('');
   const [minDeviation, setMinDeviation] = useState<number>(0);
-  const [resolvedMap, setResolvedMap] = useState<Record<string, ResolvedLocation>>({});
   const isResolvingRef = useRef(false);
 
   useEffect(() => {
@@ -39,10 +40,12 @@ const BuildingAnalysisTable: React.FC<BuildingAnalysisTableProps> = ({ data }) =
 
   // Automatically resolve locations that need it using OSM Nominatim
   useEffect(() => {
+    if (!onLocationResolved) return;
     if (isResolvingRef.current) return;
 
     const resolveNeeded = visibleData.filter(sub => {
-      const notResolvedYet = !resolvedMap[`${sub.location.lat},${sub.location.lng}`];
+      const key = `${sub.location.lat},${sub.location.lng}`;
+      const notResolvedYet = !resolvedLocations[key];
       const hasLocation = sub.location && sub.location.lat !== 0;
       return notResolvedYet && hasLocation;
     }).slice(0, 5);
@@ -53,14 +56,14 @@ const BuildingAnalysisTable: React.FC<BuildingAnalysisTableProps> = ({ data }) =
       isResolvingRef.current = true;
       for (const sub of resolveNeeded) {
         const key = `${sub.location.lat},${sub.location.lng}`;
-        if (resolvedMap[key]) continue;
+        if (resolvedLocations[key]) continue;
 
         try {
           const result = await resolveLocation(sub.location.lat, sub.location.lng);
           if (result) {
-            setResolvedMap(prev => ({ ...prev, [key]: result }));
+            onLocationResolved(key, result);
           } else {
-            setResolvedMap(prev => ({ ...prev, [key]: { lat: sub.location.lat, lng: sub.location.lng, district: 'Bilinmiyor', city: '', country: '' } }));
+            onLocationResolved(key, { lat: sub.location.lat, lng: sub.location.lng, district: 'Bilinmiyor', city: '', country: '' });
           }
         } catch (err) {
           console.error("Location resolution error:", err);
@@ -71,11 +74,11 @@ const BuildingAnalysisTable: React.FC<BuildingAnalysisTableProps> = ({ data }) =
     };
 
     resolveAll();
-  }, [visibleData, resolvedMap]);
+  }, [visibleData, resolvedLocations, onLocationResolved]);
 
   const handleExport = () => {
     const exportData = filteredData.map(row => {
-        const resolved = resolvedMap[`${row.location.lat},${row.location.lng}`];
+        const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
         return {
             "Tesisat No": row.tesisatNo,
             "Bağlantı Nesnesi": row.baglantiNesnesi,
@@ -221,13 +224,13 @@ const BuildingAnalysisTable: React.FC<BuildingAnalysisTableProps> = ({ data }) =
                           <span className="font-mono text-xs text-slate-700 font-bold">{row.baglantiNesnesi}</span>
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5 opacity-60" title={(() => {
-                          const resolved = resolvedMap[`${row.location.lat},${row.location.lng}`];
+                          const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
                           return resolved?.fullName || 'Konum Belirleniyor...';
                       })()}>
                           <MapPin className="h-3 w-3 text-slate-400" />
                           <span className="font-mono text-[10px] text-slate-500">
                               {(() => {
-                                  const resolved = resolvedMap[`${row.location.lat},${row.location.lng}`];
+                                  const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
                                   if (resolved) return `${resolved.district} / ${resolved.city}`;
                                   return `${row.location.lat.toFixed(4)}, ${row.location.lng.toFixed(4)}`;
                               })()}

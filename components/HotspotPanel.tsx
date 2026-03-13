@@ -1,11 +1,12 @@
 
 import React, { useMemo, useEffect } from 'react';
 import { RiskScore, Hotspot, ReferenceLocation } from '../types';
-import { AlertTriangle, Search, ChevronDown, X } from 'lucide-react';
+import { AlertTriangle, Search, ChevronDown, X, MapPin } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, Polygon, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { ISTANBUL_DISTRICTS } from '../utils/fraudEngine';
 import { DISTRICT_BOUNDS } from '../utils/weatherEngine';
+import { ResolvedLocation } from '../services/locationService';
 
 interface HotspotPanelProps {
   hotspots?: Hotspot[]; 
@@ -15,6 +16,7 @@ interface HotspotPanelProps {
   onDistrictSelect?: (district: string | null) => void;
   detectedCity?: string;
   availableDistricts?: string[];
+  resolvedLocations?: Record<string, ResolvedLocation>;
 }
 
 // --- Helper Component for Smooth Zooming using Bounds ---
@@ -38,7 +40,8 @@ const HotspotPanel: React.FC<HotspotPanelProps> = ({
     selectedDistrict, 
     onDistrictSelect,
     detectedCity = 'İSTANBUL',
-    availableDistricts = []
+    availableDistricts = [],
+    resolvedLocations = {}
 }) => {
   // Helper for text normalization
   const normalizeTr = (text: string) => text.toLocaleUpperCase('tr').trim();
@@ -238,7 +241,20 @@ const HotspotPanel: React.FC<HotspotPanelProps> = ({
                                 <div className="p-0">
                                     <div className="border-b border-gray-100 pb-2 mb-2">
                                         <h4 className="font-bold text-gray-800 text-sm leading-tight">{p.id}</h4>
-                                        <p className="text-[10px] text-gray-500 mt-0.5 font-mono">{p.lat.toFixed(5)}, {p.lng.toFixed(5)}</p>
+                                        <div className="flex items-center gap-1 mt-1 text-blue-600 font-bold" title={(() => {
+                                            const resolved = resolvedLocations[`${p.lat},${p.lng}`];
+                                            return resolved?.fullName || 'Konum Belirleniyor...';
+                                        })()}>
+                                            <MapPin className="h-2.5 w-2.5" />
+                                            <span className="text-[10px]">
+                                                {(() => {
+                                                    const resolved = resolvedLocations[`${p.lat},${p.lng}`];
+                                                    if (resolved) return `${resolved.district} / ${resolved.city}`;
+                                                    return 'Konum Belirleniyor...';
+                                                })()}
+                                            </span>
+                                        </div>
+                                        <p className="text-[9px] text-gray-400 mt-0.5 font-mono ml-3.5">{p.lat.toFixed(5)}, {p.lng.toFixed(5)}</p>
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <AlertTriangle className="h-3 w-3 text-red-500" />

@@ -1,15 +1,18 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { CloudSun, ArrowRight, Building2, MapPin, Calendar, ThermometerSun, AlertCircle, Download, ChevronDown, Loader2, Info, ArrowDown } from 'lucide-react';
 import { Subscriber, WeatherRiskResult } from '../types';
 import { analyzeWeatherNormalized, TURKEY_CITIES, getMGMHeatingDegreeDays } from '../utils/weatherEngine';
+import { resolveLocation, ResolvedLocation } from '../services/locationService';
 import * as XLSX from 'xlsx';
 
 interface WeatherAnalysisViewProps {
   subscribers: Subscriber[];
+  resolvedLocations?: Record<string, ResolvedLocation>;
+  onLocationResolved?: (key: string, location: ResolvedLocation) => void;
 }
 
-const WeatherAnalysisView: React.FC<WeatherAnalysisViewProps> = ({ subscribers }) => {
+const WeatherAnalysisView: React.FC<WeatherAnalysisViewProps> = ({ subscribers, resolvedLocations = {}, onLocationResolved }) => {
   const [selectedYear, setSelectedYear] = useState<string>('2024');
   const [selectedCity, setSelectedCity] = useState<string>('');
   const [selectedDistrict, setSelectedDistrict] = useState<string>('');
@@ -18,6 +21,47 @@ const WeatherAnalysisView: React.FC<WeatherAnalysisViewProps> = ({ subscribers }
   const [isLoading, setIsLoading] = useState(false);
   const [visibleCount, setVisibleCount] = useState(50);
   const [showInfo, setShowInfo] = useState(true);
+  const isResolvingRef = useRef(false);
+
+  // Automatically resolve locations that need it using OSM Nominatim
+  useEffect(() => {
+    if (!onLocationResolved) return;
+    if (isResolvingRef.current) return;
+    if (results.length === 0) return;
+
+    const visibleData = results.slice(0, visibleCount);
+    const resolveNeeded = visibleData.filter(sub => {
+      const key = `${sub.location.lat},${sub.location.lng}`;
+      const notResolvedYet = !resolvedLocations[key];
+      const hasLocation = sub.location && sub.location.lat !== 0;
+      return notResolvedYet && hasLocation;
+    }).slice(0, 5);
+
+    if (resolveNeeded.length === 0) return;
+
+    const resolveAll = async () => {
+      isResolvingRef.current = true;
+      for (const sub of resolveNeeded) {
+        const key = `${sub.location.lat},${sub.location.lng}`;
+        if (resolvedLocations[key]) continue;
+
+        try {
+          const result = await resolveLocation(sub.location.lat, sub.location.lng);
+          if (result) {
+            onLocationResolved(key, result);
+          } else {
+            onLocationResolved(key, { lat: sub.location.lat, lng: sub.location.lng, district: 'Bilinmiyor', city: '', country: '' });
+          }
+        } catch (err) {
+          console.error("Location resolution error:", err);
+        }
+        await new Promise(resolve => setTimeout(resolve, 1100));
+      }
+      isResolvingRef.current = false;
+    };
+
+    resolveAll();
+  }, [results, visibleCount, resolvedLocations, onLocationResolved]);
 
   // Use TURKEY_CITIES constant for full list
   const cities = Object.keys(TURKEY_CITIES).sort();
@@ -255,9 +299,18 @@ const WeatherAnalysisView: React.FC<WeatherAnalysisViewProps> = ({ subscribers }
                                                     <Building2 className="h-3 w-3 text-sky-500" />
                                                     <span className="font-mono font-medium">{row.baglantiNesnesi}</span>
                                                 </div>
-                                                <div className="flex items-center gap-1.5 opacity-60 mt-1">
+                                                <div className="flex items-center gap-1.5 opacity-60 mt-1" title={(() => {
+                                                    const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
+                                                    return resolved?.fullName || 'Konum Belirleniyor...';
+                                                })()}>
                                                     <MapPin className="h-3 w-3 text-gray-400" />
-                                                    <span className="text-[10px] text-gray-500 font-mono">{row.location.lat.toFixed(4)}, {row.location.lng.toFixed(4)}</span>
+                                                    <span className="text-[10px] text-gray-500 font-mono">
+                                                        {(() => {
+                                                            const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
+                                                            if (resolved) return `${resolved.district} / ${resolved.city}`;
+                                                            return `${row.location.lat.toFixed(4)}, ${row.location.lng.toFixed(4)}`;
+                                                        })()}
+                                                    </span>
                                                 </div>
                                             </div>
                                         </td>

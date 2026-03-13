@@ -725,6 +725,7 @@ const App: React.FC = () => {
                                         onDistrictSelect={setSelectedDistrict}
                                         detectedCity={detectedCity}
                                         availableDistricts={availableDistricts}
+                                        resolvedLocations={resolvedLocations}
                                     />
                                 ) : (
                                     <div className="h-full flex flex-col items-center justify-center text-center p-6 bg-[#F5F5F7] rounded-[24px] border border-dashed border-gray-300">
@@ -785,6 +786,7 @@ const App: React.FC = () => {
                                         onDistrictSelect={setSelectedDistrict}
                                         detectedCity={detectedCity}
                                         availableDistricts={availableDistricts}
+                                        resolvedLocations={resolvedLocations}
                                     />
                                 </div>
                                 <div className="h-[500px] bg-white rounded-[32px] shadow-apple border border-white/50 overflow-hidden">
@@ -812,7 +814,11 @@ const App: React.FC = () => {
                              />
                         ) : (
                             <div className="h-full pb-6 bg-white rounded-[32px] shadow-apple border border-white/50 overflow-hidden">
-                                <BuildingAnalysisTable data={buildingRiskData} />
+                                <BuildingAnalysisTable 
+                                    data={buildingRiskData} 
+                                    resolvedLocations={resolvedLocations}
+                                    onLocationResolved={(key, loc) => setResolvedLocations(prev => ({ ...prev, [key]: loc }))}
+                                />
                             </div>
                         )}
                     </div>
@@ -821,7 +827,11 @@ const App: React.FC = () => {
                 {/* WEATHER ANALYSIS VIEW (NEW) */}
                 {dashboardView === 'weather' && (
                     <div className="h-full animate-slide-up">
-                        <WeatherAnalysisView subscribers={rawSubscribers} />
+                        <WeatherAnalysisView 
+                            subscribers={rawSubscribers} 
+                            resolvedLocations={resolvedLocations}
+                            onLocationResolved={(key, loc) => setResolvedLocations(prev => ({ ...prev, [key]: loc }))}
+                        />
                     </div>
                 )}
 
