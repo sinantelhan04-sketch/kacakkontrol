@@ -50,30 +50,43 @@ const InconsistentTable: React.FC<InconsistentTableProps> = ({ data, resolvedLoc
     const resolveVisible = async () => {
       const itemsToResolve = visibleData
         .filter(sub => {
-          const key = `${sub.location.lat},${sub.location.lng}`;
+          const key = `${sub.location.lat.toFixed(5)},${sub.location.lng.toFixed(5)}`;
           const notResolvedYet = !resolvedLocations[key];
           const hasLocation = sub.location && sub.location.lat !== 0;
           return notResolvedYet && hasLocation;
         })
-        .slice(0, 3);
+        .slice(0, 5); // Increased slice for parallel resolution
 
       if (itemsToResolve.length === 0) return;
 
       isResolvingRef.current = true;
-      for (const sub of itemsToResolve) {
-        const key = `${sub.location.lat},${sub.location.lng}`;
-        if (resolvedLocations[key]) continue;
-        
+
+      const resolveWithRetry = async (sub: RiskScore, attempt = 1): Promise<void> => {
+        const key = `${sub.location.lat.toFixed(5)},${sub.location.lng.toFixed(5)}`;
+        if (resolvedLocations[key]) return;
+
         try {
           const resolved = await resolveLocation(sub.location.lat, sub.location.lng);
           if (resolved) {
             onLocationResolved(key, resolved);
+          } else if (attempt < 2) {
+            await new Promise(r => setTimeout(r, 1000));
+            return resolveWithRetry(sub, attempt + 1);
           }
-        } catch (e) {
-          console.error("Resolution error in view:", e);
+        } catch {
+          if (attempt < 2) {
+            await new Promise(r => setTimeout(r, 1000));
+            return resolveWithRetry(sub, attempt + 1);
+          }
         }
-        await new Promise(r => setTimeout(r, 500));
+      };
+
+      // Resolve visible items sequentially with stagger
+      for (const sub of itemsToResolve) {
+        await resolveWithRetry(sub);
+        await new Promise(r => setTimeout(r, 300));
       }
+      
       isResolvingRef.current = false;
     };
 
@@ -82,7 +95,7 @@ const InconsistentTable: React.FC<InconsistentTableProps> = ({ data, resolvedLoc
 
   const handleExport = () => {
     const exportData = filteredData.map(row => {
-        const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
+        const resolved = resolvedLocations[`${row.location.lat.toFixed(5)},${row.location.lng.toFixed(5)}`];
         return {
             "Tesisat No": row.tesisatNo,
             "Muhatap No": row.muhatapNo,
@@ -93,8 +106,7 @@ const InconsistentTable: React.FC<InconsistentTableProps> = ({ data, resolvedLoc
                            ? 'Olası Sömestr' 
                            : (row.inconsistentData.volatilityScore > 0 ? 'ZigZag (Dalgalı)' : 'Kritik Düşüş'),
             "Risk Puanı": row.breakdown.trendInconsistency,
-            "Adres": resolved?.fullName || row.address,
-            "İlçe (OSM)": resolved?.district || ""
+            "İlçe / İl": resolved ? `${resolved.district} / ${resolved.city}` : row.district || ""
         };
     });
 
@@ -159,7 +171,6 @@ const InconsistentTable: React.FC<InconsistentTableProps> = ({ data, resolvedLoc
               <th className="px-6 py-4">Abone Tipi</th>
               <th className="px-6 py-4">Tespit Edilen Tutarsızlık</th>
               <th className="px-6 py-4">Sinyal Türü</th>
-              <th className="px-6 py-4">Adres</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-pink-100/50">
@@ -176,6 +187,16 @@ const InconsistentTable: React.FC<InconsistentTableProps> = ({ data, resolvedLoc
                         <div className="flex flex-col">
                             <span className="font-bold text-slate-800 group-hover:text-black font-mono transition-colors">{row.tesisatNo}</span>
                             <span className="text-xs text-slate-400 font-mono mt-0.5">{row.muhatapNo}</span>
+                            <div className="flex items-center gap-1 mt-1">
+                                <MapPin className="h-3 w-3 text-pink-400" />
+                                <span className="text-[10px] text-slate-500 font-medium">
+                                    {(() => {
+                                        const resolved = resolvedLocations[`${row.location.lat.toFixed(5)},${row.location.lng.toFixed(5)}`];
+                                        if (resolved) return `${resolved.district} / ${resolved.city}`;
+                                        return row.district || 'Belirleniyor...';
+                                    })()}
+                                </span>
+                            </div>
                         </div>
                     </td>
                     <td className="px-6 py-4">
@@ -210,26 +231,6 @@ const InconsistentTable: React.FC<InconsistentTableProps> = ({ data, resolvedLoc
                                 Kritik Düşüş
                             </span>
                         )}
-                    </td>
-                    <td className="px-6 py-4">
-                        <div className="flex flex-col">
-                            <div className="flex items-center gap-1 text-slate-600 font-bold mb-0.5" title={(() => {
-                                const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
-                                return resolved?.fullName || 'Konum Belirleniyor...';
-                            })()}>
-                                <MapPin className="h-3 w-3 text-pink-400" />
-                                <span className="text-xs">
-                                    {(() => {
-                                        const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
-                                        if (resolved) return `${resolved.district} / ${resolved.city}`;
-                                        return row.district || 'Belirleniyor...';
-                                    })()}
-                                </span>
-                            </div>
-                            <span className="text-[10px] text-slate-400 font-mono ml-4">
-                                {row.location.lat.toFixed(4)}, {row.location.lng.toFixed(4)}
-                            </span>
-                        </div>
                     </td>
                 </tr>
                );

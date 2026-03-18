@@ -161,5 +161,54 @@ export const resolveLocationOSM = async (
   }
 };
 
+/**
+ * Nominatim search API ile metinden koordinat ve adres bulur (Forward Geocoding)
+ */
+export const searchAddressOSM = async (
+  query: string,
+  options: { signal?: AbortSignal } = {}
+): Promise<ResolvedLocation[]> => {
+  if (!query || query.length < 3) return [];
+
+  const url = new URL("https://nominatim.openstreetmap.org/search");
+  url.searchParams.set("format", "json");
+  url.searchParams.set("q", query);
+  url.searchParams.set("addressdetails", "1");
+  url.searchParams.set("accept-language", "tr");
+  url.searchParams.set("limit", "5");
+  url.searchParams.set("countrycodes", "tr"); // Sadece Türkiye sonuçları
+
+  try {
+    const response = await fetch(url, {
+      signal: options.signal,
+      headers: {
+        "User-Agent": "KacakAnaliz/1.0 (kacak-analiz@example.com)",
+      },
+    });
+
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    if (!Array.isArray(data)) return [];
+
+    return data.map((item: any) => {
+      const addr = item.address || {};
+      return {
+        lat: parseFloat(item.lat),
+        lng: parseFloat(item.lon),
+        district: addr.town || addr.city_district || addr.county || addr.suburb || addr.municipality || "—",
+        city: addr.city || addr.province || addr.state || "—",
+        province: addr.province || addr.state,
+        country: addr.country || "Türkiye",
+        fullName: item.display_name,
+        confidence: item.importance ? Math.round(item.importance * 100) : undefined,
+      };
+    });
+  } catch (err) {
+    console.error("[searchAddressOSM]", err);
+    return [];
+  }
+};
+
 // Vercel build hatasını çözmek için eski isimlendirmeye alias ekliyoruz
 export const resolveLocation = resolveLocationOSM;

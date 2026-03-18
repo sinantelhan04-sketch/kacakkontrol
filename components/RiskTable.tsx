@@ -97,7 +97,6 @@ const RiskTable: React.FC<RiskTableProps> = ({ data, resolvedLocations = {} }) =
             <tr>
               <th className="px-8 py-3">#</th>
               <th className="px-6 py-3">Abone Bilgisi</th>
-              <th className="px-6 py-3">Konum</th>
               <th className="px-6 py-3">Risk Puanı</th>
               <th className="px-6 py-3">Tespit Detayları</th>
               <th className="px-6 py-3">Durum</th>
@@ -118,32 +117,19 @@ const RiskTable: React.FC<RiskTableProps> = ({ data, resolvedLocations = {} }) =
                             <span className="font-semibold text-[#1D1D1F] text-sm tracking-tight">{row.tesisatNo}</span>
                             <span className="text-xs text-[#86868B] font-medium">{row.muhatapNo}</span>
                             {row.baglantiNesnesi && <span className="text-[10px] text-slate-400 mt-0.5">BN: {row.baglantiNesnesi}</span>}
+                            <div className="flex items-center gap-1 mt-1">
+                                <MapPin className="h-3 w-3 text-apple-blue" />
+                                <span className="text-[10px] text-slate-500 font-medium">
+                                    {(() => {
+                                        const key = `${row.location.lat.toFixed(5)},${row.location.lng.toFixed(5)}`;
+                                        const resolved = resolvedLocations[key];
+                                        if (resolved) return `${resolved.district} / ${resolved.city}`;
+                                        return row.district || 'Belirleniyor...';
+                                    })()}
+                                </span>
+                            </div>
                         </div>
                     </div>
-                </td>
-                <td className="px-6 py-4">
-                  <div className="flex flex-col">
-                    {row.location.lat !== 0 ? (
-                        <>
-                          <div className="flex items-center gap-1 text-[#1D1D1F] font-bold mb-0.5">
-                            <MapPin className="h-3 w-3 text-apple-blue" />
-                            <span className="text-xs truncate max-w-[150px]">
-                              {(() => {
-                                const key = `${row.location.lat},${row.location.lng}`;
-                                const resolved = resolvedLocations[key];
-                                if (resolved) return `${resolved.district} / ${resolved.city}`;
-                                return row.district || 'Konum Belirleniyor...';
-                              })()}
-                            </span>
-                          </div>
-                          <span className="text-[10px] font-medium text-[#86868B] bg-[#F5F5F7] px-2 py-0.5 rounded-lg w-fit">
-                              {row.location.lat.toFixed(4)}, {row.location.lng.toFixed(4)}
-                          </span>
-                        </>
-                    ) : (
-                        <span className="text-xs text-gray-300">—</span>
-                    )}
-                  </div>
                 </td>
                 <td className="px-6 py-4">
                     <div className="flex items-center gap-2.5">

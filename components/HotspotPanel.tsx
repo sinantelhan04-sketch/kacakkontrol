@@ -1,12 +1,12 @@
 
-import React, { useMemo, useEffect } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import { RiskScore, Hotspot, ReferenceLocation } from '../types';
-import { AlertTriangle, Search, ChevronDown, X, MapPin } from 'lucide-react';
+import { AlertTriangle, Search, ChevronDown, X, MapPin, Loader2, LayoutDashboard } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, Polygon, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { ISTANBUL_DISTRICTS } from '../utils/fraudEngine';
 import { DISTRICT_BOUNDS } from '../utils/weatherEngine';
-import { ResolvedLocation } from '../services/locationService';
+import { ResolvedLocation, searchAddressOSM } from '../services/locationService';
 
 interface HotspotPanelProps {
   hotspots?: Hotspot[]; 
@@ -43,6 +43,11 @@ const HotspotPanel: React.FC<HotspotPanelProps> = ({
     availableDistricts = [],
     resolvedLocations = {}
 }) => {
+  const [addressSearch, setAddressSearch] = useState('');
+  const [searchResults, setSearchResults] = useState<ResolvedLocation[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchMarker, setSearchMarker] = useState<[number, number] | null>(null);
+
   // Helper for text normalization
   const normalizeTr = (text: string) => text.toLocaleUpperCase('tr').trim();
 
@@ -111,6 +116,10 @@ const HotspotPanel: React.FC<HotspotPanelProps> = ({
 
   // 3. Map Bounds Calculation
   const mapBounds = useMemo<L.LatLngBoundsExpression | null>(() => {
+    if (searchMarker) {
+        return L.latLngBounds([searchMarker, searchMarker]);
+    }
+
     if (selectedDistrict) {
         const normSelected = normalizeTr(selectedDistrict);
         const shapeKey = Object.keys(districtPolygons).find(k => normalizeTr(k) === normSelected);
@@ -132,13 +141,40 @@ const HotspotPanel: React.FC<HotspotPanelProps> = ({
     });
 
     return [[minLat, minLng], [maxLat, maxLng]];
-  }, [selectedDistrict, renderPoints, districtPolygons]);
+  }, [selectedDistrict, renderPoints, districtPolygons, searchMarker]);
 
   const handleDistrictChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
       const val = e.target.value;
       if (onDistrictSelect) {
           onDistrictSelect(val === "" ? null : val);
       }
+      setSearchMarker(null); // Clear search marker when changing district
+  };
+
+  const handleAddressSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addressSearch || addressSearch.length < 3) return;
+
+    setIsSearching(true);
+    try {
+        const results = await searchAddressOSM(addressSearch);
+        setSearchResults(results);
+        if (results.length > 0) {
+            const first = results[0];
+            setSearchMarker([first.lat, first.lng]);
+            if (onDistrictSelect) onDistrictSelect(null); // Clear district filter to show search result
+        }
+    } catch (err) {
+        console.error("Search error:", err);
+    } finally {
+        setIsSearching(false);
+    }
+  };
+
+  const selectSearchResult = (res: ResolvedLocation) => {
+    setSearchMarker([res.lat, res.lng]);
+    setSearchResults([]);
+    setAddressSearch(res.fullName || '');
   };
 
   const districtList = availableDistricts.length > 0 ? availableDistricts : Object.keys(districtPolygons);
@@ -147,9 +183,10 @@ const HotspotPanel: React.FC<HotspotPanelProps> = ({
     <div className="bg-white rounded-[28px] overflow-hidden flex flex-col h-full relative group font-sans border border-white/50 shadow-inner">
       
       {/* Simplified Search/Filter Bar */}
-      <div className="absolute top-4 left-4 z-[500] w-[260px]">
+      <div className="absolute top-4 left-4 z-[500] flex flex-col gap-2 w-[300px]">
+          {/* District Selector */}
           <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-sm border border-gray-100 flex items-center h-10 px-3 transition-all hover:shadow-md">
-             <Search className="h-4 w-4 text-gray-400 mr-2 shrink-0" />
+             <LayoutDashboard className="h-4 w-4 text-gray-400 mr-2 shrink-0" />
              <div className="flex-1 relative">
                 <select 
                     value={selectedDistrict || ""} 
@@ -173,6 +210,42 @@ const HotspotPanel: React.FC<HotspotPanelProps> = ({
                     <X className="h-3 w-3" />
                  </button>
              )}
+          </div>
+
+          {/* Address Search */}
+          <div className="relative">
+            <form onSubmit={handleAddressSearch} className="bg-white/95 backdrop-blur-md rounded-2xl shadow-sm border border-gray-100 flex items-center h-10 px-3 transition-all hover:shadow-md">
+                <Search className="h-4 w-4 text-gray-400 mr-2 shrink-0" />
+                <input 
+                    type="text"
+                    placeholder="Adres ara (Sokak, Mahalle...)"
+                    value={addressSearch}
+                    onChange={(e) => setAddressSearch(e.target.value)}
+                    className="flex-1 bg-transparent text-xs font-semibold text-gray-700 focus:outline-none py-1"
+                />
+                {isSearching ? (
+                    <Loader2 className="h-3 w-3 text-blue-500 animate-spin" />
+                ) : addressSearch && (
+                    <button type="button" onClick={() => { setAddressSearch(''); setSearchMarker(null); setSearchResults([]); }}>
+                        <X className="h-3 w-3 text-gray-400 hover:text-red-500" />
+                    </button>
+                )}
+            </form>
+
+            {searchResults.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white/95 backdrop-blur-md rounded-xl shadow-lg border border-gray-100 overflow-hidden max-h-48 overflow-y-auto z-[501]">
+                    {searchResults.map((res, idx) => (
+                        <button 
+                            key={idx}
+                            onClick={() => selectSearchResult(res)}
+                            className="w-full text-left px-3 py-2 hover:bg-blue-50 transition-colors border-b border-gray-50 last:border-0"
+                        >
+                            <p className="text-[10px] font-bold text-gray-800 truncate">{res.fullName}</p>
+                            <p className="text-[9px] text-gray-500">{res.district} / {res.city}</p>
+                        </button>
+                    ))}
+                </div>
+            )}
           </div>
       </div>
 
@@ -229,6 +302,20 @@ const HotspotPanel: React.FC<HotspotPanelProps> = ({
             })}
             
             {/* Markers */}
+            {searchMarker && (
+                <Marker position={searchMarker} icon={L.divIcon({
+                    className: 'search-marker',
+                    html: `<div class="search-pin"><div class="pin-inner"></div></div>`,
+                    iconSize: [30, 30],
+                    iconAnchor: [15, 30]
+                })}>
+                    <Popup className="google-popup" closeButton={false}>
+                        <div className="text-xs font-bold text-blue-600">Aranan Konum</div>
+                        <div className="text-[10px] text-gray-600 mt-1">{addressSearch}</div>
+                    </Popup>
+                </Marker>
+            )}
+
             {renderPoints.map((p, i) => {
                 return (
                     <Marker 
@@ -325,6 +412,25 @@ const HotspotPanel: React.FC<HotspotPanelProps> = ({
         @keyframes radar-ping {
             0% { transform: scale(0.5); opacity: 1; }
             100% { transform: scale(2.5); opacity: 0; }
+        }
+        .search-pin {
+            width: 30px;
+            height: 30px;
+            background: #3B82F6;
+            border-radius: 50% 50% 50% 0;
+            transform: rotate(-45deg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            border: 2px solid white;
+        }
+        .pin-inner {
+            width: 10px;
+            height: 10px;
+            background: white;
+            border-radius: 50%;
+            transform: rotate(45deg);
         }
       `}</style>
     </div>

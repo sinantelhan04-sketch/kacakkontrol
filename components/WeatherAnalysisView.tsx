@@ -25,13 +25,11 @@ const WeatherAnalysisView: React.FC<WeatherAnalysisViewProps> = ({ subscribers, 
 
   // Automatically resolve locations that need it using OSM Nominatim
   useEffect(() => {
-    if (!onLocationResolved) return;
-    if (isResolvingRef.current) return;
-    if (results.length === 0) return;
+    if (!onLocationResolved || isResolvingRef.current || results.length === 0) return;
 
     const visibleData = results.slice(0, visibleCount);
     const resolveNeeded = visibleData.filter(sub => {
-      const key = `${sub.location.lat},${sub.location.lng}`;
+      const key = `${sub.location.lat.toFixed(5)},${sub.location.lng.toFixed(5)}`;
       const notResolvedYet = !resolvedLocations[key];
       const hasLocation = sub.location && sub.location.lat !== 0;
       return notResolvedYet && hasLocation;
@@ -41,22 +39,33 @@ const WeatherAnalysisView: React.FC<WeatherAnalysisViewProps> = ({ subscribers, 
 
     const resolveAll = async () => {
       isResolvingRef.current = true;
-      for (const sub of resolveNeeded) {
-        const key = `${sub.location.lat},${sub.location.lng}`;
-        if (resolvedLocations[key]) continue;
+
+      const resolveWithRetry = async (sub: WeatherRiskResult, attempt = 1): Promise<void> => {
+        const key = `${sub.location.lat.toFixed(5)},${sub.location.lng.toFixed(5)}`;
+        if (resolvedLocations[key]) return;
 
         try {
           const result = await resolveLocation(sub.location.lat, sub.location.lng);
           if (result) {
             onLocationResolved(key, result);
-          } else {
-            onLocationResolved(key, { lat: sub.location.lat, lng: sub.location.lng, district: 'Bilinmiyor', city: '', country: '' });
+          } else if (attempt < 2) {
+            await new Promise(r => setTimeout(r, 1000));
+            return resolveWithRetry(sub, attempt + 1);
           }
-        } catch (err) {
-          console.error("Location resolution error:", err);
+        } catch {
+          if (attempt < 2) {
+            await new Promise(r => setTimeout(r, 1000));
+            return resolveWithRetry(sub, attempt + 1);
+          }
         }
-        await new Promise(resolve => setTimeout(resolve, 1100));
+      };
+
+      // Resolve visible items sequentially with stagger
+      for (const sub of resolveNeeded) {
+        await resolveWithRetry(sub);
+        await new Promise(r => setTimeout(r, 300));
       }
+      
       isResolvingRef.current = false;
     };
 
@@ -299,14 +308,11 @@ const WeatherAnalysisView: React.FC<WeatherAnalysisViewProps> = ({ subscribers, 
                                                     <Building2 className="h-3 w-3 text-sky-500" />
                                                     <span className="font-mono font-medium">{row.baglantiNesnesi}</span>
                                                 </div>
-                                                <div className="flex items-center gap-1.5 opacity-60 mt-1" title={(() => {
-                                                    const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
-                                                    return resolved?.fullName || 'Konum Belirleniyor...';
-                                                })()}>
+                                                <div className="flex items-center gap-1.5 opacity-60 mt-1">
                                                     <MapPin className="h-3 w-3 text-gray-400" />
                                                     <span className="text-[10px] text-gray-500 font-mono">
                                                         {(() => {
-                                                            const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
+                                                            const resolved = resolvedLocations[`${row.location.lat.toFixed(5)},${row.location.lng.toFixed(5)}`];
                                                             if (resolved) return `${resolved.district} / ${resolved.city}`;
                                                             return `${row.location.lat.toFixed(4)}, ${row.location.lng.toFixed(4)}`;
                                                         })()}

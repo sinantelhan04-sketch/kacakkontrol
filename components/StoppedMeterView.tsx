@@ -1,8 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Subscriber } from '../types';
-import { OctagonPause, Search, Download, Filter, Building2, User, ChevronDown, AlertCircle } from 'lucide-react';
+import { OctagonPause, Search, Download, Filter, Building2, User, ChevronDown, AlertCircle, MapPin } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { identifyDistrictGeometric } from '../utils/fraudEngine';
 import { resolveLocation, ResolvedLocation } from '../services/locationService';
 
 interface StoppedMeterViewProps {
@@ -14,7 +13,7 @@ interface StoppedMeterViewProps {
 const StoppedMeterView: React.FC<StoppedMeterViewProps> = ({ 
   subscribers, 
   resolvedLocations = {}, 
-  onLocationResolved 
+  onLocationResolved
 }) => {
   const [selectedType, setSelectedType] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -174,7 +173,7 @@ const StoppedMeterView: React.FC<StoppedMeterViewProps> = ({
     const resolveVisible = async () => {
       const itemsToResolve = visibleData
         .filter(sub => {
-          const key = `${sub.location.lat},${sub.location.lng}`;
+          const key = `${sub.location.lat.toFixed(5)},${sub.location.lng.toFixed(5)}`;
           const notResolvedYet = !resolvedLocations[key];
           const hasLocation = sub.location && sub.location.lat !== 0;
           return notResolvedYet && hasLocation;
@@ -185,7 +184,7 @@ const StoppedMeterView: React.FC<StoppedMeterViewProps> = ({
 
       isResolvingRef.current = true;
       for (const sub of itemsToResolve) {
-        const key = `${sub.location.lat},${sub.location.lng}`;
+        const key = `${sub.location.lat.toFixed(5)},${sub.location.lng.toFixed(5)}`;
         if (resolvedLocations[key]) continue;
         
         try {
@@ -211,8 +210,7 @@ const StoppedMeterView: React.FC<StoppedMeterViewProps> = ({
   const handleExport = () => {
     if (filteredData.length === 0) return;
     const exportData = filteredData.map(row => {
-      const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
-      const displayAddress = resolved?.fullName || row.address;
+      const resolved = resolvedLocations[`${row.location.lat.toFixed(5)},${row.location.lng.toFixed(5)}`];
 
       if (activeTab === 'mustakil-kombi') {
         const summerAvg = ((row.consumption.jun || 0) + (row.consumption.jul || 0) + (row.consumption.aug || 0)) / 3;
@@ -221,8 +219,7 @@ const StoppedMeterView: React.FC<StoppedMeterViewProps> = ({
           "Tesisat No": row.tesisatNo,
           "Muhatap No": row.muhatapNo,
           "Abone Tipi": row.rawAboneTipi,
-          "Adres": displayAddress,
-          "İlçe (OSM)": resolved?.district || "",
+          "İlçe / İl": resolved ? `${resolved.district} / ${resolved.city}` : row.district || "",
           "Yaz Ortalaması (m3)": summerAvg.toFixed(1),
           "Kış Ortalaması (m3)": winterAvg.toFixed(1),
           "Durum": 'YAZ ≈ KIŞ (ŞÜPHELİ)'
@@ -232,8 +229,7 @@ const StoppedMeterView: React.FC<StoppedMeterViewProps> = ({
         "Tesisat No": row.tesisatNo,
         "Muhatap No": row.muhatapNo,
         "Abone Tipi": row.rawAboneTipi,
-        "Adres": displayAddress,
-        "İlçe (OSM)": resolved?.district || "",
+        "İlçe / İl": resolved ? `${resolved.district} / ${resolved.city}` : row.district || "",
         "Aralık (m3)": row.consumption.dec,
         "Ocak (m3)": row.consumption.jan,
         "Şubat (m3)": row.consumption.feb,
@@ -258,7 +254,6 @@ const StoppedMeterView: React.FC<StoppedMeterViewProps> = ({
 
   return (
     <div className="bg-white rounded-[32px] shadow-apple border border-white/50 flex flex-col h-full overflow-hidden relative">
-      
       {/* Header */}
       <div className="px-8 py-6 border-b border-[#F5F5F7] bg-white/80 backdrop-blur-xl sticky top-0 z-10">
         <div className="flex items-center justify-between mb-6">
@@ -416,7 +411,6 @@ const StoppedMeterView: React.FC<StoppedMeterViewProps> = ({
                                 </>
                             )}
                             <th className="px-6 py-4">Durum</th>
-                            <th className="px-6 py-4">Adres</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
@@ -434,6 +428,16 @@ const StoppedMeterView: React.FC<StoppedMeterViewProps> = ({
                                         <div className="flex flex-col">
                                             <span className="font-bold text-[#1D1D1F] font-mono">{row.tesisatNo}</span>
                                             <span className="text-xs text-gray-400">{row.muhatapNo}</span>
+                                            <div className="flex items-center gap-1 mt-1">
+                                                <MapPin className="h-3 w-3 text-rose-400" />
+                                                <span className="text-[10px] text-gray-500 font-medium">
+                                                    {(() => {
+                                                        const resolved = resolvedLocations[`${row.location.lat.toFixed(5)},${row.location.lng.toFixed(5)}`];
+                                                        if (resolved) return `${resolved.district} / ${resolved.city}`;
+                                                        return row.district || 'Belirleniyor...';
+                                                    })()}
+                                                </span>
+                                            </div>
                                         </div>
                                     </td>
                                     <td className="px-6 py-4">
@@ -508,45 +512,6 @@ const StoppedMeterView: React.FC<StoppedMeterViewProps> = ({
                                             )}
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4">
-                                    <div className="flex flex-col max-w-xs">
-                                        <div className="flex items-center gap-1 text-[#1D1D1F] font-bold mb-0.5">
-                                                     <span className="truncate" title={(() => {
-                                                const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
-                                                return resolved?.fullName || 'Konum Belirleniyor...';
-                                            })()}>
-                                                {(() => {
-                                                    const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
-                                                    if (resolved) return `${resolved.district} / ${resolved.city}`;
-                                                    
-                                                    // Fallback to geometric identification if OSM not yet resolved
-                                                    return row.district || identifyDistrictGeometric(row.location.lat, row.location.lng) || 'Konum Belirleniyor...';
-                                                })()}
-                                            </span>
-                                        </div>
-                                        <a 
-                                            href={`https://www.google.com/maps/search/?api=1&query=${row.location.lat},${row.location.lng}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-[10px] text-gray-400 truncate hover:text-rose-600 hover:underline transition-colors flex items-center gap-1" 
-                                            title={(() => {
-                                                const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
-                                                return resolved?.fullName || 'Google Haritalarda Aç';
-                                            })()}
-                                        >
-                                            {(() => {
-                                                const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
-                                                if (resolved) {
-                                                    // Show neighborhood or street if available
-                                                    const addr = resolved.fullName?.split(',') || [];
-                                                    return addr[0] || 'Haritada Gör';
-                                                }
-                                                return 'Haritada Gör';
-                                            })()}
-                                            <AlertCircle className="h-2 w-2" />
-                                        </a>
-                                    </div>
-                                </td>
                             </tr>
                         );
                     })}

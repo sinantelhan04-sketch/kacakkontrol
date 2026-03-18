@@ -42,30 +42,43 @@ const TamperingTable: React.FC<TamperingTableProps> = ({ data, resolvedLocations
     const resolveVisible = async () => {
       const itemsToResolve = visibleData
         .filter(sub => {
-          const key = `${sub.location.lat},${sub.location.lng}`;
+          const key = `${sub.location.lat.toFixed(5)},${sub.location.lng.toFixed(5)}`;
           const notResolvedYet = !resolvedLocations[key];
           const hasLocation = sub.location && sub.location.lat !== 0;
           return notResolvedYet && hasLocation;
         })
-        .slice(0, 3);
+        .slice(0, 5); // Increased slice for parallel resolution
 
       if (itemsToResolve.length === 0) return;
 
       isResolvingRef.current = true;
-      for (const sub of itemsToResolve) {
-        const key = `${sub.location.lat},${sub.location.lng}`;
-        if (resolvedLocations[key]) continue;
-        
+
+      const resolveWithRetry = async (sub: RiskScore, attempt = 1): Promise<void> => {
+        const key = `${sub.location.lat.toFixed(5)},${sub.location.lng.toFixed(5)}`;
+        if (resolvedLocations[key]) return;
+
         try {
           const resolved = await resolveLocation(sub.location.lat, sub.location.lng);
           if (resolved) {
             onLocationResolved(key, resolved);
+          } else if (attempt < 2) {
+            await new Promise(r => setTimeout(r, 1000));
+            return resolveWithRetry(sub, attempt + 1);
           }
-        } catch (e) {
-          console.error("Resolution error in view:", e);
+        } catch {
+          if (attempt < 2) {
+            await new Promise(r => setTimeout(r, 1000));
+            return resolveWithRetry(sub, attempt + 1);
+          }
         }
-        await new Promise(r => setTimeout(r, 500));
+      };
+
+      // Resolve visible items sequentially with stagger
+      for (const sub of itemsToResolve) {
+        await resolveWithRetry(sub);
+        await new Promise(r => setTimeout(r, 300));
       }
+      
       isResolvingRef.current = false;
     };
 
@@ -74,7 +87,7 @@ const TamperingTable: React.FC<TamperingTableProps> = ({ data, resolvedLocations
 
   const handleExport = () => {
     const exportData = sortedData.map(row => {
-        const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
+        const resolved = resolvedLocations[`${row.location.lat.toFixed(5)},${row.location.lng.toFixed(5)}`];
         return {
             "Tesisat No": row.tesisatNo,
             "Muhatap No": row.muhatapNo,
@@ -83,8 +96,7 @@ const TamperingTable: React.FC<TamperingTableProps> = ({ data, resolvedLocations
             "Yaz Ortalaması (m3)": row.seasonalStats.summerAvg,
             "Kış Ortalaması (m3)": row.seasonalStats.winterAvg,
             "Isınma Katsayısı (Kat)": row.heatingSensitivity.toFixed(2),
-            "Adres": resolved?.fullName || row.address,
-            "İlçe (OSM)": resolved?.district || ""
+            "İlçe / İl": resolved ? `${resolved.district} / ${resolved.city}` : row.district || ""
         };
     });
 
@@ -159,14 +171,11 @@ const TamperingTable: React.FC<TamperingTableProps> = ({ data, resolvedLocations
                     <div className="flex flex-col">
                         <span className="font-bold text-slate-800 group-hover:text-black font-mono transition-colors">{row.tesisatNo}</span>
                         <span className="text-xs text-slate-400 font-mono mt-0.5">{row.muhatapNo}</span>
-                        <div className="flex items-center gap-1 mt-1" title={(() => {
-                            const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
-                            return resolved?.fullName || 'Konum Belirleniyor...';
-                        })()}>
+                        <div className="flex items-center gap-1 mt-1">
                             <MapPin className="h-3 w-3 text-orange-400" />
                             <span className="text-[10px] text-slate-500 font-medium">
                                 {(() => {
-                                    const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
+                                    const resolved = resolvedLocations[`${row.location.lat.toFixed(5)},${row.location.lng.toFixed(5)}`];
                                     if (resolved) return `${resolved.district} / ${resolved.city}`;
                                     return row.district || 'Belirleniyor...';
                                 })()}

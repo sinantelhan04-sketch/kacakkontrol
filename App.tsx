@@ -1,6 +1,6 @@
 
 
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useCallback } from 'react';
 import { CheckCircle, BrainCircuit, FileSpreadsheet, FileText, XCircle, ShieldCheck, Zap, Loader2, Play, BookOpen, UploadCloud, Building2, ChevronRight } from 'lucide-react';
 import StatsCards from './components/StatsCards';
 import RiskTable from './components/RiskTable';
@@ -13,6 +13,8 @@ import WeatherAnalysisView from './components/WeatherAnalysisView';
 import HotspotPanel from './components/HotspotPanel';
 import AiReportView from './components/AiReportView';
 import StoppedMeterView from './components/StoppedMeterView';
+import IrregularConsumptionView from './components/IrregularConsumptionView';
+import SampleDownloadSection from './components/SampleDownloadSection';
 import Sidebar from './components/Sidebar';
 import DashboardChart from './components/DashboardChart';
 import ExplainerModal from './components/ExplainerModal';
@@ -22,13 +24,13 @@ import { generateComprehensiveReport } from './services/geminiService';
 import { RiskScore, EngineStats, Subscriber, ReferenceLocation, AnalysisStatus, BuildingRisk } from './types';
 import * as XLSX from 'xlsx';
 import { processFiles } from './utils/dataLoader';
-import { resolveLocation, ResolvedLocation } from './services/locationService';
+import { ResolvedLocation } from './services/locationService';
 
 const App: React.FC = () => {
   // Stages: setup (upload) -> dashboard (loaded but idle) -> analyzing (processing)
   const [appStage, setAppStage] = useState<'setup' | 'dashboard'>('setup');
   const [showLanding, setShowLanding] = useState<boolean>(true);
-  const [dashboardView, setDashboardView] = useState<'general' | 'tampering' | 'inconsistent' | 'rule120' | 'georisk' | 'ai-report' | 'building' | 'weather' | 'stopped'>('general');
+  const [dashboardView, setDashboardView] = useState<'general' | 'tampering' | 'inconsistent' | 'rule120' | 'georisk' | 'ai-report' | 'building' | 'weather' | 'stopped' | 'irregular'>('general');
 
   // DATA STATE
   const [rawSubscribers, setRawSubscribers] = useState<Subscriber[]>([]); // Holds parsed Excel data
@@ -66,8 +68,6 @@ const App: React.FC = () => {
   const [loadingStatusText, setLoadingStatusText] = useState<string>("Hazırlanıyor...");
   const [duplicateInfo, setDuplicateInfo] = useState<{totalRows: number, uniqueSubs: number} | null>(null);
   const [resolvedLocations, setResolvedLocations] = useState<Record<string, ResolvedLocation>>({});
-  const [isResolvingLocations, setIsResolvingLocations] = useState(false);
-
   // File Refs for UI state (names)
   const fileInputRefA = useRef<HTMLInputElement>(null);
   const fileInputRefB = useRef<HTMLInputElement>(null);
@@ -76,54 +76,13 @@ const App: React.FC = () => {
   // Ref to store actual File objects for processing
   const fileObjects = useRef<{a: File | null, b: File | null}>({ a: null, b: null });
 
-  // --- SEQUENTIAL LOCATION RESOLUTION ---
-  React.useEffect(() => {
-    if (rawSubscribers.length === 0 || isResolvingLocations) return;
-
-    const startResolution = async () => {
-      setIsResolvingLocations(true);
-      
-      // Get all unique coordinates that haven't been resolved yet
-      const uniqueCoords = Array.from(new Set(
-        rawSubscribers
-          .filter(s => s.location.lat !== 0 && s.location.lng !== 0)
-          .map(s => `${s.location.lat},${s.location.lng}`)
-      )).filter(key => !resolvedLocations[key]);
-
-      if (uniqueCoords.length === 0) {
-        setIsResolvingLocations(false);
-        return;
-      }
-
-      // Resolve one by one
-      for (const coordKey of uniqueCoords) {
-        // Double check if it was resolved in the meantime (e.g. by another component)
-        if (resolvedLocations[coordKey]) continue;
-
-        const [lat, lng] = coordKey.split(',').map(Number);
-        
-        try {
-          const resolved = await resolveLocation(lat, lng);
-          if (resolved) {
-            setResolvedLocations(prev => ({
-              ...prev,
-              [coordKey]: resolved
-            }));
-          }
-        } catch (error) {
-          console.error(`Error resolving ${coordKey}:`, error);
-        }
-        
-        // Wait at least 1 second between requests to respect OSM Nominatim policy
-        // even if it was cached in sessionStorage, a small delay is good for UI stability
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-      
-      setIsResolvingLocations(false);
-    };
-
-    startResolution();
-  }, [rawSubscribers, isResolvingLocations, resolvedLocations]);
+  // --- LOCATION RESOLUTION ---
+  const handleLocationResolved = useCallback((key: string, loc: ResolvedLocation) => {
+    setResolvedLocations(prev => {
+      if (prev[key]) return prev; // Already have it
+      return { ...prev, [key]: loc };
+    });
+  }, []);
 
   // --- STAGE 1: LOAD DATA & INITIALIZE BASE SCORES ---
   const handleLoadData = async () => {
@@ -397,17 +356,20 @@ const App: React.FC = () => {
 
   const handleExportResults = () => {
       if (riskData.length === 0) return;
-      const ws = XLSX.utils.json_to_sheet(riskData.map(r => ({
-          TesisatNo: r.tesisatNo,
-          MuhatapNo: r.muhatapNo,
-          RiskPuani: r.totalScore,
-          Seviye: r.riskLevel,
-          Enlem: r.location.lat,
-          Boylam: r.location.lng,
-          Adres: r.address,
-          Il: r.city,
-          Ilce: r.district
-      })));
+      const ws = XLSX.utils.json_to_sheet(riskData.map(r => {
+          const resolved = resolvedLocations[`${r.location.lat.toFixed(5)},${r.location.lng.toFixed(5)}`];
+          return {
+              TesisatNo: r.tesisatNo,
+              MuhatapNo: r.muhatapNo,
+              RiskPuani: r.totalScore,
+              Seviye: r.riskLevel,
+              Enlem: r.location.lat,
+              Boylam: r.location.lng,
+              "İlçe / İl": resolved ? `${resolved.district} / ${resolved.city}` : r.district || "",
+              Il: r.city,
+              Ilce: r.district
+          };
+      }));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "AnalizSonuclari");
       XLSX.writeFile(wb, "kacak_analiz_sonuclari.xlsx");
@@ -611,10 +573,14 @@ const App: React.FC = () => {
                 {!files.a && !files.b && loadingProgress === 0 && (
                     <button 
                         onClick={handleLoadData}
-                        className="text-[#86868B] hover:text-apple-blue text-sm font-bold transition-colors flex items-center gap-2"
+                        className="text-[#86868B] hover:text-apple-blue text-sm font-bold transition-colors flex items-center gap-2 mb-4"
                     >
                         <Zap className="h-4 w-4" /> Demo Verisi ile Deneyin
                     </button>
+                )}
+
+                {!files.a && !files.b && loadingProgress === 0 && (
+                    <SampleDownloadSection />
                 )}
             </div>
         </div>
@@ -645,6 +611,7 @@ const App: React.FC = () => {
                         {dashboardView === 'building' && 'Bina Tüketimi (Komşu Analizi)'}
                         {dashboardView === 'weather' && 'Hava Koşulları Analizi'}
                         {dashboardView === 'stopped' && 'Duran Sayaç Analizi'}
+                        {dashboardView === 'irregular' && 'Usulsüz Tüketim Analizi'}
                         {dashboardView === 'tampering' && 'Müdahale Analizi'}
                         {dashboardView === 'inconsistent' && 'Tutarsız Kış Tüketimi'}
                         {dashboardView === 'rule120' && '120 sm³ Kuralı'}
@@ -793,7 +760,7 @@ const App: React.FC = () => {
                                         <GeoRiskTable 
                                             data={filteredRiskData.filter(r => r.breakdown.geoRisk > 0)} 
                                             resolvedLocations={resolvedLocations}
-                                            onLocationResolved={(key, loc) => setResolvedLocations(prev => ({ ...prev, [key]: loc }))}
+                                            onLocationResolved={handleLocationResolved}
                                         />
                                 </div>
                             </>
@@ -817,7 +784,7 @@ const App: React.FC = () => {
                                 <BuildingAnalysisTable 
                                     data={buildingRiskData} 
                                     resolvedLocations={resolvedLocations}
-                                    onLocationResolved={(key, loc) => setResolvedLocations(prev => ({ ...prev, [key]: loc }))}
+                                    onLocationResolved={handleLocationResolved}
                                 />
                             </div>
                         )}
@@ -830,7 +797,7 @@ const App: React.FC = () => {
                         <WeatherAnalysisView 
                             subscribers={rawSubscribers} 
                             resolvedLocations={resolvedLocations}
-                            onLocationResolved={(key, loc) => setResolvedLocations(prev => ({ ...prev, [key]: loc }))}
+                            onLocationResolved={handleLocationResolved}
                         />
                     </div>
                 )}
@@ -841,7 +808,18 @@ const App: React.FC = () => {
                         <StoppedMeterView 
                             subscribers={rawSubscribers} 
                             resolvedLocations={resolvedLocations}
-                            onLocationResolved={(key, loc) => setResolvedLocations(prev => ({ ...prev, [key]: loc }))}
+                            onLocationResolved={handleLocationResolved}
+                        />
+                    </div>
+                )}
+                
+                {/* IRREGULAR CONSUMPTION VIEW */}
+                {dashboardView === 'irregular' && (
+                    <div className="h-full animate-slide-up">
+                        <IrregularConsumptionView 
+                            subscribers={rawSubscribers} 
+                            resolvedLocations={resolvedLocations}
+                            onLocationResolved={handleLocationResolved}
                         />
                     </div>
                 )}
@@ -866,7 +844,7 @@ const App: React.FC = () => {
                                     <TamperingTable 
                                         data={filteredRiskData.filter(r => r.isTamperingSuspect)} 
                                         resolvedLocations={resolvedLocations}
-                                        onLocationResolved={(key, loc) => setResolvedLocations(prev => ({ ...prev, [key]: loc }))}
+                                        onLocationResolved={handleLocationResolved}
                                     />
                                 </div>
                             </>
@@ -890,7 +868,7 @@ const App: React.FC = () => {
                                 <Rule120Table 
                                     data={filteredRiskData.filter(r => r.is120RuleSuspect)} 
                                     resolvedLocations={resolvedLocations}
-                                    onLocationResolved={(key, loc) => setResolvedLocations(prev => ({ ...prev, [key]: loc }))}
+                                    onLocationResolved={handleLocationResolved}
                                 />
                             </div>
                         )}
@@ -913,7 +891,7 @@ const App: React.FC = () => {
                                 <InconsistentTable 
                                     data={filteredRiskData.filter(r => r.inconsistentData.hasWinterDrop || r.inconsistentData.isSemesterSuspect)} 
                                     resolvedLocations={resolvedLocations}
-                                    onLocationResolved={(key, loc) => setResolvedLocations(prev => ({ ...prev, [key]: loc }))}
+                                    onLocationResolved={handleLocationResolved}
                                 />
                             </div>
                         )}

@@ -39,30 +39,43 @@ const GeoRiskTable: React.FC<GeoRiskTableProps> = ({ data, resolvedLocations = {
     const resolveVisible = async () => {
       const itemsToResolve = visibleData
         .filter(sub => {
-          const key = `${sub.location.lat},${sub.location.lng}`;
+          const key = `${sub.location.lat.toFixed(5)},${sub.location.lng.toFixed(5)}`;
           const notResolvedYet = !resolvedLocations[key];
           const hasLocation = sub.location && sub.location.lat !== 0;
           return notResolvedYet && hasLocation;
         })
-        .slice(0, 3);
+        .slice(0, 5); // Increased slice for parallel resolution
 
       if (itemsToResolve.length === 0) return;
 
       isResolvingRef.current = true;
-      for (const sub of itemsToResolve) {
-        const key = `${sub.location.lat},${sub.location.lng}`;
-        if (resolvedLocations[key]) continue;
-        
+      
+      const resolveWithRetry = async (sub: RiskScore, attempt = 1): Promise<void> => {
+        const key = `${sub.location.lat.toFixed(5)},${sub.location.lng.toFixed(5)}`;
+        if (resolvedLocations[key]) return;
+
         try {
           const resolved = await resolveLocation(sub.location.lat, sub.location.lng);
           if (resolved) {
             onLocationResolved(key, resolved);
+          } else if (attempt < 2) {
+            await new Promise(r => setTimeout(r, 1000));
+            return resolveWithRetry(sub, attempt + 1);
           }
-        } catch (e) {
-          console.error("Resolution error in view:", e);
+        } catch {
+          if (attempt < 2) {
+            await new Promise(r => setTimeout(r, 1000));
+            return resolveWithRetry(sub, attempt + 1);
+          }
         }
-        await new Promise(r => setTimeout(r, 500));
+      };
+
+      // Resolve visible items sequentially with stagger to avoid rate limits
+      for (const sub of itemsToResolve) {
+        await resolveWithRetry(sub);
+        await new Promise(r => setTimeout(r, 300));
       }
+      
       isResolvingRef.current = false;
     };
 
@@ -71,14 +84,13 @@ const GeoRiskTable: React.FC<GeoRiskTableProps> = ({ data, resolvedLocations = {
 
   const handleExport = () => {
     const exportData = filteredData.map(row => {
-        const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
+        const resolved = resolvedLocations[`${row.location.lat.toFixed(5)},${row.location.lng.toFixed(5)}`];
         return {
             "Tesisat No": row.tesisatNo,
             "Muhatap No": row.muhatapNo,
             "Bağlantı Nesnesi": row.baglantiNesnesi,
             "Abone Tipi": row.rawAboneTipi || row.aboneTipi,
-            "Adres": resolved?.fullName || row.address,
-            "İlçe (OSM)": resolved?.district || "",
+            "İlçe / İl": resolved ? `${resolved.district} / ${resolved.city}` : row.district || "",
             "Enlem": row.location.lat,
             "Boylam": row.location.lng,
             "Aralık (m3)": row.rule120Data?.dec || 0,
@@ -147,7 +159,6 @@ const GeoRiskTable: React.FC<GeoRiskTableProps> = ({ data, resolvedLocations = {
             <tr>
               <th className="px-6 py-4">Tesisat No</th>
               <th className="px-6 py-4">Abone Tipi</th>
-              <th className="px-6 py-4">Koordinat (Enlem, Boylam)</th>
               <th className="px-6 py-4">Kış Tüketimi (Oca/Şub)</th>
               <th className="px-6 py-4">Risk Durumu</th>
             </tr>
@@ -168,6 +179,17 @@ const GeoRiskTable: React.FC<GeoRiskTableProps> = ({ data, resolvedLocations = {
                     <div className="flex flex-col">
                         <span className="font-bold text-slate-800 group-hover:text-black font-mono transition-colors">{row.tesisatNo}</span>
                         <span className="text-xs text-slate-400 font-mono mt-0.5">{row.muhatapNo}</span>
+                        <div className="flex items-center gap-1 mt-1">
+                            <MapPin className="h-3 w-3 text-red-500" />
+                            <span className="text-[10px] text-slate-500 font-medium">
+                                {(() => {
+                                    const key = `${row.location.lat.toFixed(5)},${row.location.lng.toFixed(5)}`;
+                                    const resolved = resolvedLocations[key];
+                                    if (resolved) return `${resolved.district} / ${resolved.city}`;
+                                    return row.district || 'Belirleniyor...';
+                                })()}
+                            </span>
+                        </div>
                     </div>
                 </td>
                 <td className="px-6 py-4">
@@ -181,26 +203,6 @@ const GeoRiskTable: React.FC<GeoRiskTableProps> = ({ data, resolvedLocations = {
                             {row.rawAboneTipi || (row.aboneTipi === 'Commercial' ? 'Ticari' : 'Mesken')}
                         </span>
                     </div>
-                </td>
-                <td className="px-6 py-4">
-                     <div className="flex flex-col">
-                        <div className="flex items-center gap-2" title={(() => {
-                            const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
-                            return resolved?.fullName || 'Konum Belirleniyor...';
-                        })()}>
-                            <MapPin className="h-3 w-3 text-red-500" />
-                            <span className="text-xs text-slate-600 font-bold">
-                                {(() => {
-                                    const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
-                                    if (resolved) return `${resolved.district} / ${resolved.city}`;
-                                    return row.district || 'Belirleniyor...';
-                                })()}
-                            </span>
-                        </div>
-                        <span className="text-[10px] text-slate-400 font-mono mt-0.5 ml-5">
-                            {row.location.lat.toFixed(5)}, {row.location.lng.toFixed(5)}
-                        </span>
-                     </div>
                 </td>
                 <td className="px-6 py-4">
                      <div className="flex gap-2">

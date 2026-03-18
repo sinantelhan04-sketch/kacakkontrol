@@ -40,11 +40,10 @@ const BuildingAnalysisTable: React.FC<BuildingAnalysisTableProps> = ({ data, res
 
   // Automatically resolve locations that need it using OSM Nominatim
   useEffect(() => {
-    if (!onLocationResolved) return;
-    if (isResolvingRef.current) return;
+    if (!onLocationResolved || isResolvingRef.current) return;
 
     const resolveNeeded = visibleData.filter(sub => {
-      const key = `${sub.location.lat},${sub.location.lng}`;
+      const key = `${sub.location.lat.toFixed(5)},${sub.location.lng.toFixed(5)}`;
       const notResolvedYet = !resolvedLocations[key];
       const hasLocation = sub.location && sub.location.lat !== 0;
       return notResolvedYet && hasLocation;
@@ -54,22 +53,33 @@ const BuildingAnalysisTable: React.FC<BuildingAnalysisTableProps> = ({ data, res
 
     const resolveAll = async () => {
       isResolvingRef.current = true;
-      for (const sub of resolveNeeded) {
-        const key = `${sub.location.lat},${sub.location.lng}`;
-        if (resolvedLocations[key]) continue;
+
+      const resolveWithRetry = async (sub: BuildingRisk, attempt = 1): Promise<void> => {
+        const key = `${sub.location.lat.toFixed(5)},${sub.location.lng.toFixed(5)}`;
+        if (resolvedLocations[key]) return;
 
         try {
           const result = await resolveLocation(sub.location.lat, sub.location.lng);
           if (result) {
             onLocationResolved(key, result);
-          } else {
-            onLocationResolved(key, { lat: sub.location.lat, lng: sub.location.lng, district: 'Bilinmiyor', city: '', country: '' });
+          } else if (attempt < 2) {
+            await new Promise(r => setTimeout(r, 1000));
+            return resolveWithRetry(sub, attempt + 1);
           }
-        } catch (err) {
-          console.error("Location resolution error:", err);
+        } catch {
+          if (attempt < 2) {
+            await new Promise(r => setTimeout(r, 1000));
+            return resolveWithRetry(sub, attempt + 1);
+          }
         }
-        await new Promise(resolve => setTimeout(resolve, 1100));
+      };
+
+      // Resolve visible items sequentially with stagger
+      for (const sub of resolveNeeded) {
+        await resolveWithRetry(sub);
+        await new Promise(r => setTimeout(r, 300));
       }
+      
       isResolvingRef.current = false;
     };
 
@@ -78,7 +88,7 @@ const BuildingAnalysisTable: React.FC<BuildingAnalysisTableProps> = ({ data, res
 
   const handleExport = () => {
     const exportData = filteredData.map(row => {
-        const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
+        const resolved = resolvedLocations[`${row.location.lat.toFixed(5)},${row.location.lng.toFixed(5)}`];
         return {
             "Tesisat No": row.tesisatNo,
             "Bağlantı Nesnesi": row.baglantiNesnesi,
@@ -90,8 +100,7 @@ const BuildingAnalysisTable: React.FC<BuildingAnalysisTableProps> = ({ data, res
             "Ocak": row.monthlyData.jan,
             "Şubat": row.monthlyData.feb,
             "Mart": row.monthlyData.mar,
-            "Adres": resolved?.fullName || row.address,
-            "İlçe (OSM)": resolved?.district || ""
+            "İlçe / İl": resolved ? `${resolved.district} / ${resolved.city}` : row.district || ""
         };
     });
 
@@ -223,14 +232,11 @@ const BuildingAnalysisTable: React.FC<BuildingAnalysisTableProps> = ({ data, res
                           <Building2 className="h-3 w-3 text-indigo-400" />
                           <span className="font-mono text-xs text-slate-700 font-bold">{row.baglantiNesnesi}</span>
                       </div>
-                      <div className="flex items-center gap-1.5 mt-0.5 opacity-60" title={(() => {
-                          const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
-                          return resolved?.fullName || 'Konum Belirleniyor...';
-                      })()}>
+                      <div className="flex items-center gap-1.5 mt-0.5 opacity-60">
                           <MapPin className="h-3 w-3 text-slate-400" />
                           <span className="font-mono text-[10px] text-slate-500">
                               {(() => {
-                                  const resolved = resolvedLocations[`${row.location.lat},${row.location.lng}`];
+                                  const resolved = resolvedLocations[`${row.location.lat.toFixed(5)},${row.location.lng.toFixed(5)}`];
                                   if (resolved) return `${resolved.district} / ${resolved.city}`;
                                   return `${row.location.lat.toFixed(4)}, ${row.location.lng.toFixed(4)}`;
                               })()}
